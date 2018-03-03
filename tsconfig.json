@@ -1,7 +1,19 @@
 {
     "compilerOptions": {
-        "target": "es6",
+        "target": "es2018",
         "module": "commonjs",
-        "sourceMap": true
-    }
+        "sourceMap": true,
+        "declaration": true,
+        "outDir": "./dist",
+        "strict": true,
+        "noImplicitAny": true,
+        "alwaysStrict": true,
+        "declarationDir": "lib",
+        "forceConsistentCasingInFileNames": true,
+        "strictNullChecks": true,
+    },
+    "exclude": [
+        "./dist",
+        "./lib"
+    ]
 }

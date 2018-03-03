@@ -1,1 +1,0 @@
-type LogFunction = (message: string) => void;

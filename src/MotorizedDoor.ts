@@ -1,10 +1,14 @@
 import * as process from "process";
 import * as rpio from "rpio";
+import { GpioRelay, GpioRelayConfiguration } from "./Actuators/GpioRelay";
+import { SignalDispatcher } from "strongly-typed-events/dist/signals";
+import { ISignal } from "strongly-typed-events/dist/definitions/subscribables";
+import { isUndefined, isNullOrUndefined } from "util";
 import { Sensor } from "./Sensors/Sensor";
 import { GpioSensor, GpioSensorConfiguration } from "./Sensors/GpioSensor";
 import { TimedSensor } from "./Sensors/TimedSensor";
-import { PulseRelay, PulseRelayConfiguration } from "./ResettingRelay";
-import { SignalDispatcher } from "strongly-typed-events/dist/signals";
+import { IRelay } from "./Actuators/Relay";
+import { PulseDecorator } from "./Actuators/PulseDecorator";
 
 export class MotorizedDoor {
     /** set if the door doesn't reach a sensor with the expected time */
@@ -12,17 +16,17 @@ export class MotorizedDoor {
     /** state the door is transitioning to */
     protected targetState: TargetState = TargetState.CLOSED;
     /** handle for timeout triggering failure state */
-    private transitionTimeoutHandler: NodeJS.Timer = null;
+    private transitionTimeoutHandler: NodeJS.Timer | null;
     /** keeps track of which direction the door were moving in before it might have been stopped */
-    private lastDirection: TargetState = null;
+    private lastDirection: TargetState | null;
     /** time waited from when the sensors were expected to be reach and until a failure is declared */
     private static failureTimeoutLeniency: number = 5;
     /** relay to control the door */
-    private readonly relay: PulseRelay = null;
+    private readonly relay: PulseDecorator;
     /** sensor at closed position */
-    private readonly closedSensor: Sensor = null;
+    private readonly closedSensor: Sensor;
     /** sensor at opened position */
-    private readonly openSensor: Sensor = null;
+    private readonly openSensor: Sensor;
 
     /** end user configuration */
     private readonly _config: DoorConfiguration;
@@ -83,7 +87,7 @@ export class MotorizedDoor {
 
     //#endregion
 
-    protected static doorStateToString(state: number): string {
+    protected static doorStateToString(state: CurrentState | TargetState): string {
         switch (state) {
             case CurrentState.OPEN:
                 return "Open";
@@ -95,36 +99,42 @@ export class MotorizedDoor {
                 return "Closing";
             case CurrentState.STOPPED:
                 return "Stopped";
+            default:
+                return `Undefined (${state})`;
         }
     }
 
-    constructor(readonly log: LogFunction, config: DoorConfiguration) {
+    constructor(config: DoorConfiguration, readonly log: (msg: string) => void) {
         this.log = log;
 
-        this._config = Object.assign(
-            {},
-            {
+        if (config === undefined)
+            throw "No config provided";
+
+        this._config = {
+            ...{
                 openSensor: null,
                 closedSensor: null,
-                switch: Object.assign(
-                    {},
-                    <PulseRelayConfiguration>{
+                switch: {
+                    ...{
+                        pin: -1,
                         activeValue: true,
                         cycle: 600
                     },
-                    config.switch),
+                    ...config.switch
+                },
                 canBeStopped: true,
-                rpioSettings: Object.assign(
-                    {},
-                    <RPIO.Options>{
+                rpioSettings: {
+                    ...<RPIO.Options>{
                         gpiomem: true,
                         mapping: "physical"
                     },
-                    config.rpioSettings),
+                    ...config.rpioSettings
+                },
                 maxTransitionTime: 30,
-                // https://developer.apple.com/documentation/homekit/hmcharacteristicvaluedoorstate
                 initialFallbackState: TargetState.CLOSED
-            }, config);
+            },
+            ...config
+        };
 
         if (process.geteuid() !== 0 && this._config.rpioSettings.gpiomem === false) {
             log("WARN! WARN! WARN! Using /dev/mem and not running as root");
@@ -132,45 +142,55 @@ export class MotorizedDoor {
 
         rpio.init(this._config.rpioSettings);
 
-        // binding to sensors change events
-        if (this._config.openSensor !== null) {
-            this.openSensor = new GpioSensor("Open sensor (GPIO)", this._config.openSensor);
+        { // Create sensors
+            let closedSensor: Sensor | null = null;
+            let openSensor: Sensor | null = null;
+
+            // binding to sensors change events
+            if (!isNullOrUndefined(this._config.openSensor)) {
+                openSensor = new GpioSensor("Open sensor (GPIO)", this._config.openSensor, this.log);
+            }
+
+            if (!isNullOrUndefined(this._config.closedSensor)) {
+                closedSensor = new GpioSensor("Closed sensor (GPIO)", this._config.closedSensor, this.log);
+            }
+
+            if (closedSensor === null) {
+                let state = openSensor !== null ? !openSensor.active : this.config.initialFallbackState === TargetState.CLOSED;
+                let sensor = new TimedSensor("Closed sensor (virtual)", state, this._config.maxTransitionTime * 1000, this.log);
+                this.onStopped.subscribe(() => sensor.clearTimeTrigger());
+                this.onOpening.subscribe(() => sensor.trigger(false));;
+                this.onClosing.subscribe(() => sensor.delayedTrigger(true));
+                closedSensor = sensor;
+            }
+
+            if (openSensor === null) {
+                let state = closedSensor !== null ? !closedSensor.active : this.config.initialFallbackState === TargetState.OPEN;
+                let sensor = new TimedSensor("Open sensor (virtual)", state, this._config.maxTransitionTime * 1000, this.log);
+                this.onStopped.subscribe(() => sensor.clearTimeTrigger());
+                this.onClosing.subscribe(() => sensor.trigger(false));
+                this.onOpening.subscribe(() => sensor.delayedTrigger(true));
+                openSensor = sensor;
+            }
+            this.openSensor = openSensor;
+            this.closedSensor = closedSensor;
+
+            this.openSensor.onActivated.subscribe((sender) => this.opened(sender));
+            this.openSensor.onDeactivated.subscribe((sender) => this.closing(sender));
+            this.closedSensor.onActivated.subscribe((sender) => this.closed(sender));
+            this.closedSensor.onDeactivated.subscribe((sender) => this.opening(sender));
+
+            this.log(`Open sensor reporting ${this.openSensor.active}`);
+            this.log(`Closed sensor reporting ${this.closedSensor.active}`);
         }
-
-        if (this._config.closedSensor !== null) {
-            this.closedSensor = new GpioSensor("Closed sensor (GPIO)", this._config.closedSensor);
-        }
-
-        if (this.closedSensor === null) {
-            let state = this.openSensor !== null ? !this.openSensor.active : this.config.initialFallbackState === TargetState.CLOSED;
-            let sensor = new TimedSensor("Closed sensor (virtual)", state, this._config.maxTransitionTime, this.log);
-            this.onStopped.subscribe(() => sensor.clearTimeTrigger());
-            this.onOpening.subscribe(() => sensor.trigger(false));;
-            this.onClosing.subscribe(() => sensor.delayedTrigger(true));
-            this.closedSensor = sensor;
-        }
-
-        if (this.openSensor === null) {
-            let state = this.closedSensor !== null ? !this.closedSensor.active : this.config.initialFallbackState === TargetState.OPEN;
-            let sensor = new TimedSensor("Open sensor (virtual)", false, this._config.maxTransitionTime, this.log);
-            this.onStopped.subscribe(() => sensor.clearTimeTrigger());
-            this.onClosing.subscribe(() => sensor.trigger(false));
-            this.onOpening.subscribe(() => sensor.delayedTrigger(true));
-            this.openSensor = sensor;
-        }
-
-        this.openSensor.onActivated.subscribe((sender) => this.opened(sender));
-        this.openSensor.onDeactivated.subscribe((sender) => this.closing(sender));
-        this.closedSensor.onActivated.subscribe((sender) => this.closed(sender));
-        this.closedSensor.onDeactivated.subscribe((sender) => this.opening(sender));
-
-        this.log(`Open sensor reporting ${this.openSensor.active}`);
-        this.log(`Closed sensor reporting ${this.closedSensor.active}`);
 
         this.log(`Initial door state: ${MotorizedDoor.doorStateToString(this.currentState)}`);
 
+        this.transitionTimeoutHandler = null;
+        this.lastDirection = null;
+
         // Setting output to off
-        this.relay = new PulseRelay(this.log, this._config.switch);
+        this.relay = new PulseDecorator(new GpioRelay("relay", this._config.switch, log), this._config.switch.cycle);
     }
 
     public close(): void {
@@ -298,7 +318,7 @@ export class MotorizedDoor {
 
     //#endregion
 
-    get currentState() {
+    get currentState(): CurrentState {
         if (this.openSensor.active && !this.closedSensor.active) {
             return CurrentState.OPEN;
         }
@@ -315,23 +335,30 @@ export class MotorizedDoor {
 
                     case TargetState.CLOSED:
                         return CurrentState.CLOSING;
+
+                    default:
+                        return <any>this.targetState;
                 }
             }
         }
+        throw "Invalid state - both sensors active at once";
     }
 };
 
 export interface DoorConfiguration {
     name: string;
-    openSensor?: GpioSensorConfiguration;
-    closedSensor?: GpioSensorConfiguration;
-    switch: PulseRelayConfiguration;
-    canBeStopped?: boolean;
-    rpioSettings?: RPIO.Options;
+    openSensor: GpioSensorConfiguration;
+    closedSensor: GpioSensorConfiguration;
+    switch: SwitchConfig;
+    canBeStopped: boolean;
+    rpioSettings: RPIO.Options;
     maxTransitionTime: number;
-    initialFallbackState?: TargetState;
-
+    initialFallbackState: TargetState;
 };
+
+export interface SwitchConfig extends GpioRelayConfiguration {
+    cycle: number;
+}
 
 export enum TargetState {
     OPEN = 0,

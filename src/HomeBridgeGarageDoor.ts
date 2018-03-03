@@ -10,20 +10,20 @@ export class HomeBridgeGarageDoor extends MotorizedDoor {
     /** Homebridge service for the door */
     private readonly garageDoorService: any;
 
-    constructor(homebridge: any, log: LogFunction, config: HomebridgeDoorConfiguration) {
-        super(log, config);
+    constructor(homebridge: any, config: HomebridgeDoorConfiguration, log: (msg: string) => void) {
+        super(config, log);
 
         Service = homebridge.hap.Service;
         Characteristic = homebridge.hap.Characteristic;
 
-        config.type = Object.assign(
-            {},
-            {
+        config.type = {
+            ...{
                 manufacturer: "Opensource Community",
                 model: "RaspPi GPIO GarageDoor",
                 serialNumber: "Version 2.0.0"
             },
-            config.type);
+            ...config.type
+        };
 
         this.garageDoorService = new Service.GarageDoorOpener(this.config.name, this.config.name);
 
@@ -31,7 +31,7 @@ export class HomeBridgeGarageDoor extends MotorizedDoor {
         currentDoorState.on("get", (callback: getCallback<CurrentState>): void => callback(null, this.currentState));
 
         let targetDoorState = this.garageDoorService.getCharacteristic(Characteristic.TargetDoorState);
-        targetDoorState.on("set", (newValue, callback) => this.setTargetState(newValue, callback));
+        targetDoorState.on("set", (newValue: TargetState, callback: setCallback) => setTargetState(newValue, callback));
         targetDoorState.on("get", (callback: getCallback<TargetState>): void => callback(null, this.targetState));
 
         this.infoService = new Service.AccessoryInformation();
@@ -50,45 +50,51 @@ export class HomeBridgeGarageDoor extends MotorizedDoor {
                 break;
         }
 
-        var transitioning = () => {
-            this.log(`Transitioning to ${MotorizedDoor.doorStateToString(this.targetState)}`);
+        this.onClosed.subscribe(() => reachedTarget());
+        this.onOpened.subscribe(() => reachedTarget());
+        this.onOpening.subscribe(() => transitioning());
+        this.onClosing.subscribe(() => transitioning());
+
+        let transitioning = () => {
+            this.log(`Transitioning to ${MotorizedDoor.doorStateToString(this.targetState)} (events suppressed ${this.suppressEvent})`);
             if (!this.suppressEvent) {
                 targetDoorState.updateValue(this.targetState);
                 currentDoorState.updateValue(this.currentState);
-
             }
         };
-        var reachedTarget = () => {
-            this.log(`Reached ${MotorizedDoor.doorStateToString(this.currentState)}`);
-            currentDoorState.updateValue(this.currentState);
-            this.suppressEvent = false;
+
+        let reachedTarget = () => {
+            this.log(`Reached ${MotorizedDoor.doorStateToString(this.currentState)} (events suppressed ${this.suppressEvent})`);
+            if (!this.suppressEvent) {
+                currentDoorState.updateValue(this.currentState);
+            }
         };
 
-        this.onClosed.subscribe(reachedTarget);
-        this.onOpened.subscribe(reachedTarget);
-        this.onOpening.subscribe(transitioning);
-        this.onClosing.subscribe(transitioning);
-    }
+        let setTargetState = (state: TargetState, callback: setCallback) => {
+            if (state === this.targetState && !this.stopped) {
+                this.log("Already at target state");
+                return;
+            }
+            if (this.currentState !== CurrentState.OPEN || this.currentState !== CurrentState.CLOSED) {
+                // Reversing; trigger end-state first
+                currentDoorState.updateValue(this.targetState);
+            }
+            this.suppressEvent = true;
+            this.log(`New state ${MotorizedDoor.doorStateToString(state)}, was ${MotorizedDoor.doorStateToString(this.currentState)} (events suppressed ${this.suppressEvent})`);
+            switch (state) {
+                case TargetState.CLOSED:
+                    this.close();
+                    break;
+                case TargetState.OPEN:
+                    this.open();
+                    break;
+                default:
+                    this.log(`Unhandled state: ${MotorizedDoor.doorStateToString(state)}`);
+            }
 
-    private setTargetState(state: TargetState, callback: setCallback): void {
-        if (state === this.targetState && !this.stopped) {
-            this.log("Already at target state");
-            return;
+            callback(null);
+            this.suppressEvent = false;
         }
-        this.suppressEvent = true;
-        this.log(`New state ${MotorizedDoor.doorStateToString(state)}, was ${MotorizedDoor.doorStateToString(this.currentState)}`);
-        switch (state) {
-            case TargetState.CLOSED:
-                this.close();
-                break;
-            case TargetState.OPEN:
-                this.open();
-                break;
-            default:
-                this.log(`Unhandled state: ${MotorizedDoor.doorStateToString(state)}`);
-        }
-
-        callback(null);
     }
 
     getServices() {

@@ -1,26 +1,23 @@
 import { Sensor } from "./Sensor";
 
 export class TimedSensor extends Sensor {
-    private timeoutHandler: NodeJS.Timer = null;
+    private timeoutHandler: NodeJS.Timer | null = null;
     private state: boolean = false;
-    private readonly log: LogFunction;
-    private triggerTimeout: number;
+    private readonly triggerTimeout: number;
 
-    constructor(name: string, initialState: boolean, triggerTimeout: number, log: LogFunction) {
-        super(name);
-        this.log = log;
+    constructor(name: string, initialState: boolean, triggerTimeout: number, log: (msg: string) => void) {
+        super(name, log);
         this.triggerTimeout = triggerTimeout;
         this.state = initialState;
-        this.log(`${this.name} created, timeout ${triggerTimeout}`);
     }
 
     public delayedTrigger(newState: boolean) {
         this.clearTimeTrigger();
-        this.log(`${this.name} setting timeout (${this.triggerTimeout} seconds)`);
+        this.log(`setting timeout (${this.triggerTimeout} seconds)`);
         this.timeoutHandler = setTimeout(() => {
             this.log(`${this.name}: timeout reached`);
             this.trigger(newState);
-        }, this.triggerTimeout * 1000);
+        }, this.triggerTimeout);
     }
 
     public get active(): boolean {
@@ -29,14 +26,14 @@ export class TimedSensor extends Sensor {
 
     public clearTimeTrigger(): void {
         if (this.timeoutHandler !== null) {
-            this.log(`${this.name} clearing timeout`);
+            this.log(`clearing timeout`);
             clearTimeout(this.timeoutHandler);
             this.timeoutHandler = null;
         }
     }
 
     public trigger(value: boolean): void {
-        this.log(`${this.name} triggerede: ${value}`);
+        this.log(`triggered: ${value}`);
         this.clearTimeTrigger();
         if (this.active === value) {
             return;

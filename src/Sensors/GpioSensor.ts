@@ -1,25 +1,31 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-const rpio = require("rpio");
-const Sensor_1 = require("./Sensor");
-class GpioSensor extends Sensor_1.Sensor {
-    constructor(name, config) {
-        super(name);
-        this.config = config;
+import * as rpio from "rpio";
+import { SimpleEventDispatcher, ISimpleEvent } from "strongly-typed-events";
+import { Sensor } from "./Sensor";
+
+export class GpioSensor extends Sensor {
+
+    private readonly onErrorEvent = new SimpleEventDispatcher<boolean>();
+    private confirmTimeout: NodeJS.Timer | null;
+
+    constructor(name: string, readonly config: GpioSensorConfiguration, log: (msg: string) => void) {
+        super(name, log);
         rpio.open(this.config.pin, rpio.INPUT, this.config.activeValue ? rpio.PULL_DOWN : rpio.PULL_UP);
         rpio.poll(this.config.pin, (pin) => this.stateChanged(pin), rpio.POLL_BOTH);
         this.confirmTimeout = null;
     }
+
     get active() {
         return rpio.read(this.config.pin) === (this.config.activeValue ? 1 : 0);
     }
-    stateChanged(pin) {
+
+    private stateChanged(pin: number) {
         if (this.confirmTimeout !== null) {
             clearTimeout(this.confirmTimeout);
         }
         this.confirmTimeout = setTimeout(() => this.confirmState(this.active), 100);
     }
-    confirmState(triggeredeValue) {
+
+    private confirmState(triggeredeValue: boolean): void {
         if (this.confirmTimeout !== null) {
             clearTimeout(this.confirmTimeout);
         }
@@ -27,19 +33,24 @@ class GpioSensor extends Sensor_1.Sensor {
         // rereading the value after a short while acts a guard against a faulty reads
         if (triggeredeValue === this.active) {
             if (triggeredeValue) {
+                this.log(`activated`);
                 this.onSensorActivating.dispatch(this);
-            }
-            else {
+            } else {
+                this.log(`deactivated`);
                 this.onSensorDeactivating.dispatch(this);
             }
-        }
-        else {
+        } else {
+            this.log(`error; re-read of value differed from first read`);
             this.onErrorEvent.dispatch(triggeredeValue);
         }
     }
-    onError() {
+
+    public onError() {
         return this.onErrorEvent.asEvent();
     }
 }
-exports.GpioSensor = GpioSensor;
-//# sourceMappingURL=GpioSensor.js.map
+
+export interface GpioSensorConfiguration {
+    pin: number,
+    activeValue: boolean
+}
