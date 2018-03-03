@@ -1,30 +1,37 @@
 {
-  "name": "homebridge-gpio-motorized-door",
-  "version": "1.0.0",
-  "description": "Exposes a door accessory to HomeBridge that uses a RaspberryPi GPIO pins",
-  "main": "index.js",
-  "keywords": [
-    "homebridge-plugin",
-    "homebridge",
-    "garagedoor",
-    "automaticdoor",
-    "gate"
-  ],
-  "author": "Morten Vejhe <morten@vejhe.com>",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/vejhe/homebridge-gpio-motorized-door.git"
-  },
-  "bugs": {
-    "url": "https://github.com/vejhe/homebridge-gpio-motorized-door/issues"
-  },
-  "homepage": "https://github.com/vejhe/homebridge-gpio-motorized-door",
-  "engines": {
-    "node": ">=0.12.0",
-    "homebridge": ">=0.4.32"
-  },
-  "dependencies": {
-    "rpio": ">=0.9.20"
-  }
+    "name": "homebridge-gpio-motorized-door",
+    "version": "1.1.0",
+    "description": "Exposes a door accessory to HomeBridge that uses a RaspberryPi GPIO pins",
+    "main": "index.js",
+    "keywords": [
+        "homebridge-plugin",
+        "homebridge",
+        "garagedoor",
+        "automaticdoor",
+        "gate"
+    ],
+    "author": "Morten Vejhe <morten@vejhe.com>",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/vejhe/homebridge-gpio-motorized-door.git"
+    },
+    "bugs": {
+        "url": "https://github.com/vejhe/homebridge-gpio-motorized-door/issues"
+    },
+    "homepage": "https://github.com/vejhe/homebridge-gpio-motorized-door",
+    "engines": {
+        "node": ">=0.12.0",
+        "homebridge": ">=0.4.32"
+    },
+    "dependencies": {
+        "process": "^0.11.10",
+        "rpio": "^0.9.20",
+        "strongly-typed-events": "^1.1.11"
+    },
+    "devDependencies": {
+        "hap-nodejs": "^0.4.41",
+        "@types/node": "^9.4.6",
+        "@types/rpio": "^0.0.2"
+    }
 }
