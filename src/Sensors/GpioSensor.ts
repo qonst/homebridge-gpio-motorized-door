@@ -1,47 +1,38 @@
-import * as rpio from "rpio";
+import { Gpio } from 'onoff';
 import { SimpleEventDispatcher, ISimpleEvent } from "strongly-typed-events";
 import { Sensor } from "./Sensor";
 
 export class GpioSensor extends Sensor {
+    private pin: Gpio;
 
-    private readonly onErrorEvent = new SimpleEventDispatcher<boolean>();
-    private confirmTimeout: NodeJS.Timer | null;
+    private readonly onErrorEvent = new SimpleEventDispatcher<any>();
 
-    constructor(name: string, readonly config: GpioSensorConfiguration, log: (msg: string) => void) {
+    constructor(name: string, private readonly config: GpioSensorConfiguration, log: (msg: string) => void) {
         super(name, log);
-        rpio.open(this.config.pin, rpio.INPUT, this.config.activeValue ? rpio.PULL_DOWN : rpio.PULL_UP);
-        rpio.poll(this.config.pin, (pin) => this.stateChanged(pin), rpio.POLL_BOTH);
-        this.confirmTimeout = null;
+        this.pin = new Gpio(this.config.pin, "in", "both", { debounceTimeout: 100 });
+        this.pin.watch((err, value) => this.stateChanged(err, value));
+        process.on('SIGINT', () => this.pin.unexport());
     }
 
     get active() {
-        return rpio.read(this.config.pin) === (this.config.activeValue ? 1 : 0);
+        return this.pin.readSync() === (this.config.activeValue ? 1 : 0);
     }
 
-    private stateChanged(pin: number) {
-        if (this.confirmTimeout !== null) {
-            clearTimeout(this.confirmTimeout);
-        }
-        this.confirmTimeout = setTimeout(() => this.confirmState(this.active), 100);
-    }
-
-    private confirmState(triggeredeValue: boolean): void {
-        if (this.confirmTimeout !== null) {
-            clearTimeout(this.confirmTimeout);
-        }
+    private stateChanged(err: any, value: number) {
         // once in a while rpio raises a state changed while the sensor hasn't been activated.
         // rereading the value after a short while acts a guard against a faulty reads
-        if (triggeredeValue === this.active) {
-            if (triggeredeValue) {
-                this.log(`activated`);
-                this.onSensorActivating.dispatch(this);
-            } else {
-                this.log(`deactivated`);
-                this.onSensorDeactivating.dispatch(this);
-            }
-        } else {
+        if (err !== null) {
             this.log(`error; re-read of value differed from first read`);
-            this.onErrorEvent.dispatch(triggeredeValue);
+            this.onErrorEvent.dispatch(err);
+            return;
+        }
+
+        if (value === (this.config.activeValue ? 1 : 0)) {
+            this.log(`activated`);
+            this.onSensorActivating.dispatch(this);
+        } else {
+            this.log(`deactivated`);
+            this.onSensorDeactivating.dispatch(this);
         }
     }
 

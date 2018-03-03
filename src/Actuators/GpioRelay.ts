@@ -1,22 +1,25 @@
-import * as rpio from "rpio";
+import { Gpio, GpioOptions } from "onoff";
 import { Relay } from "./Relay";
 
 export class GpioRelay extends Relay {
+    private pin: Gpio;
     constructor(name: string, protected readonly config: GpioRelayConfiguration, log: (msg: string) => void) {
         super(name, log);
-        rpio.open(this.config.pin, rpio.OUTPUT, this.config.activeValue ? rpio.PULL_DOWN : rpio.PULL_UP);
+        this.pin = new Gpio(this.config.pin, 'out');
+        this.off();
+        process.on('SIGINT', () => this.pin.unexport());
     }
 
     public on(): void {
-        rpio.write(this.config.pin, this.config.activeValue ? rpio.HIGH : rpio.LOW);
+        this.pin.writeSync(this.config.activeValue ? 1 : 0);
     }
 
     public off(): void {
-        rpio.write(this.config.pin, !this.config.activeValue ? rpio.HIGH : rpio.LOW);
+        this.pin.writeSync(!this.config.activeValue ? 1 : 0);
     }
 
     public get state(): boolean {
-        return rpio.read(this.config.pin) === (this.config.activeValue ? rpio.HIGH : rpio.LOW);
+        return this.pin.readSync() === (this.config.activeValue ? 1 : 0);
     }
 }
 

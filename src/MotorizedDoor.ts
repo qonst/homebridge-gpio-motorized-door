@@ -1,5 +1,4 @@
 import * as process from "process";
-import * as rpio from "rpio";
 import { GpioRelay, GpioRelayConfiguration } from "./Actuators/GpioRelay";
 import { SignalDispatcher } from "strongly-typed-events/dist/signals";
 import { ISignal } from "strongly-typed-events/dist/definitions/subscribables";
@@ -123,24 +122,11 @@ export class MotorizedDoor {
                     ...config.switch
                 },
                 canBeStopped: true,
-                rpioSettings: {
-                    ...<RPIO.Options>{
-                        gpiomem: true,
-                        mapping: "physical"
-                    },
-                    ...config.rpioSettings
-                },
                 maxTransitionTime: 30,
                 initialFallbackState: TargetState.CLOSED
             },
             ...config
         };
-
-        if (process.geteuid() !== 0 && this._config.rpioSettings.gpiomem === false) {
-            log("WARN! WARN! WARN! Using /dev/mem and not running as root");
-        }
-
-        rpio.init(this._config.rpioSettings);
 
         { // Create sensors
             let closedSensor: Sensor | null = null;
@@ -351,7 +337,6 @@ export interface DoorConfiguration {
     closedSensor: GpioSensorConfiguration;
     switch: SwitchConfig;
     canBeStopped: boolean;
-    rpioSettings: RPIO.Options;
     maxTransitionTime: number;
     initialFallbackState: TargetState;
 };

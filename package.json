@@ -30,12 +30,12 @@
         "homebridge": ">=0.4.32"
     },
     "dependencies": {
+        "onoff": "^2.0.0",
         "process": "^0.11.10",
-        "rpio": "^0.9.20",
-        "@types/rpio": "^0.0.2",
         "strongly-typed-events": "^1.1.11"
     },
     "devDependencies": {
+        "@types/onoff": "0.0.27",
         "hap-nodejs": "^0.4.41",
         "@types/node": "^9.4.6"
     }
