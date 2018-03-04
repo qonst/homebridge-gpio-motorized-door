@@ -13,11 +13,12 @@ export class MotorizedDoor {
     /** set if the door doesn't reach a sensor with the expected time */
     private _stopped: boolean = false;
     /** state the door is transitioning to */
-    protected targetState: TargetState = TargetState.CLOSED;
+
+    private _targetState: TargetState;
+    public get targetState(): TargetState { return this._targetState; }
+
     /** handle for timeout triggering failure state */
     private transitionTimeoutHandler: NodeJS.Timer | null;
-    /** keeps track of which direction the door were moving in before it might have been stopped */
-    private lastDirection: TargetState | null;
     /** time waited from when the sensors were expected to be reach and until a failure is declared */
     private static failureTimeoutLeniency: number = 5;
     /** relay to control the door */
@@ -145,8 +146,8 @@ export class MotorizedDoor {
                 let state = openSensor !== null ? !openSensor.active : this.config.initialFallbackState === TargetState.CLOSED;
                 let sensor = new TimedSensor("Closed sensor (virtual)", state, this._config.maxTransitionTime * 1000, this.log);
                 this.onStopped.subscribe(() => sensor.clearTimeTrigger());
-                this.onOpening.subscribe(() => sensor.trigger(false));;
-                this.onClosing.subscribe(() => sensor.delayedTrigger(true));
+                this.onOpen.subscribe(() => sensor.trigger(false));;
+                this.onClose.subscribe(() => sensor.delayedTrigger(true));
                 closedSensor = sensor;
             }
 
@@ -154,52 +155,61 @@ export class MotorizedDoor {
                 let state = closedSensor !== null ? !closedSensor.active : this.config.initialFallbackState === TargetState.OPEN;
                 let sensor = new TimedSensor("Open sensor (virtual)", state, this._config.maxTransitionTime * 1000, this.log);
                 this.onStopped.subscribe(() => sensor.clearTimeTrigger());
-                this.onClosing.subscribe(() => sensor.trigger(false));
-                this.onOpening.subscribe(() => sensor.delayedTrigger(true));
+                this.onClose.subscribe(() => sensor.trigger(false));
+                this.onOpen.subscribe(() => sensor.delayedTrigger(true));
                 openSensor = sensor;
             }
             this.openSensor = openSensor;
             this.closedSensor = closedSensor;
 
-            this.openSensor.onActivated.subscribe((sender) => this.opened(sender));
-            this.openSensor.onDeactivated.subscribe((sender) => this.closing(sender));
-            this.closedSensor.onActivated.subscribe((sender) => this.closed(sender));
-            this.closedSensor.onDeactivated.subscribe((sender) => this.opening(sender));
+            this.openSensor.onActivated.subscribe((sender) => this.targetReached(sender, TargetState.OPEN, this.onOpenedEvent));
+            this.openSensor.onDeactivated.subscribe((sender) => this.transitioning(sender, CurrentState.CLOSING, TargetState.CLOSED, this.onClosingEvent));
+
+            this.closedSensor.onActivated.subscribe((sender) => this.targetReached(sender, TargetState.CLOSED, this.onClosedEvent));
+            this.closedSensor.onDeactivated.subscribe((sender) => this.transitioning(sender, CurrentState.OPENING, TargetState.OPEN, this.onOpeningEvent));
 
             this.log(`Open sensor reporting ${this.openSensor.active}`);
             this.log(`Closed sensor reporting ${this.closedSensor.active}`);
+
+            switch (this.currentState) {
+                case CurrentState.OPEN:
+                case CurrentState.OPENING:
+                    this._targetState = TargetState.OPEN;
+                    break;
+
+                case CurrentState.CLOSED:
+                case CurrentState.CLOSING:
+                    this._targetState = TargetState.CLOSED;
+                    break;
+
+                default:
+                    this._targetState = this.config.initialFallbackState;
+            }
         }
 
         this.log(`Initial door state: ${MotorizedDoor.doorStateToString(this.currentState)}`);
 
         this.transitionTimeoutHandler = null;
-        this.lastDirection = null;
 
         // Setting output to off
         this.relay = new PulseDecorator(new GpioRelay("relay", this._config.switch, log), this._config.switch.cycle);
     }
 
+    //#region open/close from external source
+
     public close(): void {
         this.log(`close() invoked`);
-        if (this.currentState !== CurrentState.OPEN) {
-            // fakes we've reached open if the door is transitioning
-            this.onOpenedEvent.dispatch();
-        }
-        this.onCloseEvent.dispatchAsync();
-        this.transition(TargetState.OPEN, TargetState.CLOSED, CurrentState.CLOSING, this.onClosingEvent);
+        this.onCloseEvent.dispatch();
+        this.initiatTransition(TargetState.OPEN, TargetState.CLOSED, CurrentState.CLOSING);
     }
 
     public open(): void {
         this.log(`open() invoked`);
-        if (this.currentState !== CurrentState.CLOSED) {
-            // fakes we've reached open if the door is transitioning
-            this.onOpenedEvent.dispatch();
-        }
-        this.onOpenEvent.dispatchAsync();
-        this.transition(TargetState.CLOSED, TargetState.OPEN, CurrentState.OPENING, this.onOpeningEvent);
+        this.onOpenEvent.dispatch();
+        this.initiatTransition(TargetState.CLOSED, TargetState.OPEN, CurrentState.OPENING);
     }
 
-    private transition(from: TargetState, to: TargetState, via: CurrentState, event: SignalDispatcher) {
+    private initiatTransition(from: TargetState, to: TargetState, via: CurrentState) {
         let fromAsCurrent = <CurrentState><number>from;
         let toAsCurrent = <CurrentState><number>to;
 
@@ -209,16 +219,15 @@ export class MotorizedDoor {
         } else if (this.currentState === fromAsCurrent) {
             this.relay.on(1);
         } else if (this.currentState === CurrentState.STOPPED) {
-            if (this.lastDirection !== null && this._config.canBeStopped) {
-                if (this.lastDirection === to) {
+            if (this._config.canBeStopped) {
+                if (this.targetState === to) {
                     this.relay.on(2);
-                } else if (this.lastDirection === from) {
+                } else if (this.targetState === from) {
                     this.relay.on(1);
                 }
             } else {
                 // Stopped but cannot trigger stop (faulty hardware)
-                this.lastDirection = null;
-                this.onStoppedEvent.dispatchAsync();
+                this.onStoppedEvent.dispatch();
                 return;
             }
         } else {
@@ -226,11 +235,6 @@ export class MotorizedDoor {
                 this.relay.on(2);
             }
         }
-
-        this.lastDirection = to;
-        this.targetState = to;
-
-        event.dispatchAsync();
     }
 
     public stop(): void {
@@ -240,46 +244,48 @@ export class MotorizedDoor {
         if (this.currentState === CurrentState.CLOSING || this.currentState === CurrentState.OPENING) {
             this.relay.on(1);
         }
-        this.onStoppedEvent.dispatchAsync();
+        this.onStoppedEvent.dispatch();
     }
 
-    private closed(sensor: Sensor): void {
-        this.log(`closed() called by ${sensor.name}: ${sensor.active ? "" : "de"}activated: Door ${MotorizedDoor.doorStateToString(this.currentState)}`);
-        this.targetStateReached(sensor, TargetState.CLOSED, this.onClosedEvent);
-    }
-
-    private opened(sensor: Sensor): void {
-        this.log(`opened() called by ${sensor.name}: ${sensor.active ? "" : "de"}activated: Door ${MotorizedDoor.doorStateToString(this.currentState)}`);
-        this.targetStateReached(sensor, TargetState.OPEN, this.onOpenedEvent);
-    }
-
-    private opening(sensor: Sensor): void {
-        this.log(`opening() called by ${sensor.name}: ${sensor.active ? "" : "de"}activated: Door ${MotorizedDoor.doorStateToString(this.currentState)}`);
-        this.transitioning(this.openSensor, CurrentState.OPENING, TargetState.OPEN, this.onOpeningEvent);
-    }
-
-    private closing(sensor: Sensor): void {
-        this.log(`closing() called by ${sensor.name}: ${sensor.active ? "" : "de"}activated: Door ${MotorizedDoor.doorStateToString(this.currentState)}`);
-        this.transitioning(this.closedSensor, CurrentState.CLOSING, TargetState.CLOSED, this.onClosingEvent);
-    }
+    //#endregion
 
     private transitioning(sensor: Sensor, via: CurrentState, to: TargetState, event: SignalDispatcher): void {
         if (this.currentState === via && this.targetState === to) {
             return;
         }
-        this.lastDirection = to;
+        if (sensor.active) {
+            // Still at sensor?
+            this.log(`${sensor.name} raised transition, but it's still active; ignoreing message`);
+            return;
+        }
         this.setFailureTimeout();
-        this.targetState = to;
+        this._targetState = to;
         this.log(`${sensor.name}: door is transitioning to ${MotorizedDoor.doorStateToString(to)} by ${MotorizedDoor.doorStateToString(via)}`);
-        event.dispatchAsync();
+        event.dispatch();
     }
 
-    private targetStateReached(sensor: Sensor, at: TargetState, event: SignalDispatcher): void {
-        this.lastDirection = null; // Arrived at the terminal, no previous direction should be stored
+    private targetReached(sensor: Sensor, at: TargetState, event: SignalDispatcher): void {
+        if (!sensor.active) {
+            // Might have moved away again?
+            this.log(`${sensor.name} raised target reached, but it's not active; ignoreing message`);
+            return;
+        }
         this.removeFailureTimeout();
-        this.targetState = at;
+        if (this.targetState !== at) {
+            this.log(`!!! Arrived at ${MotorizedDoor.doorStateToString(at)}; expected ${MotorizedDoor.doorStateToString(this.targetState)}`);
+            this._targetState = at;
+            // Raising event to make sure everybody is notified
+            switch (this.targetState) {
+                case TargetState.CLOSED:
+                    this.onClosedEvent.dispatch();
+                    break;
+                case TargetState.OPEN:
+                    this.onOpenedEvent.dispatch();
+                    break;
+            }
+        }
         this.log(`${sensor.name}: door is ${MotorizedDoor.doorStateToString(this.currentState)}`);
-        event.dispatchAsync();
+        event.dispatch();
     }
 
     //#region Failure timeout
@@ -292,7 +298,7 @@ export class MotorizedDoor {
     private handleFailureTimeout(): void {
         this.log("!!! Transition timeout reached; stopped door or faulty hardware?");
         this._stopped = true;
-        this.onStoppedEvent.dispatchAsync();
+        this.onStoppedEvent.dispatch();
     }
 
     private removeFailureTimeout(): void {
@@ -307,23 +313,19 @@ export class MotorizedDoor {
     get currentState(): CurrentState {
         if (this.openSensor.active && !this.closedSensor.active) {
             return CurrentState.OPEN;
-        }
-        if (!this.openSensor.active && this.closedSensor.active) {
+        } else if (!this.openSensor.active && this.closedSensor.active) {
             return CurrentState.CLOSED;
-        }
-        if (!this.openSensor.active && !this.closedSensor.active) {
+        } else if (!this.openSensor.active && !this.closedSensor.active) {
             if (this._stopped) {
                 return CurrentState.STOPPED;
             } else {
-                switch (this.lastDirection) {
+                this.log(`currentState: no sensors active, guess from last known direction/target-states (${MotorizedDoor.doorStateToString(this.targetState)}`);
+                switch (this.targetState) {
                     case TargetState.OPEN:
                         return CurrentState.OPENING;
 
                     case TargetState.CLOSED:
                         return CurrentState.CLOSING;
-
-                    default:
-                        return <any>this.targetState;
                 }
             }
         }
