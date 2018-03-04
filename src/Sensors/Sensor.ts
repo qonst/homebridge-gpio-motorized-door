@@ -7,7 +7,7 @@ export abstract class Sensor {
     protected readonly onSensorActivating = new SimpleEventDispatcher<Sensor>();
     protected readonly onSensorDeactivating = new SimpleEventDispatcher<Sensor>();
 
-    constructor(readonly name: string, log: (msg: string) => void) { 
+    constructor(readonly name: string, log: (msg: string) => void) {
         this.log = (msg) => log(`${this.name}: ${msg}`);
     }
 

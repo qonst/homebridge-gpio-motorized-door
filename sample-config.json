@@ -1,0 +1,28 @@
+{
+    "bridge": {
+        "name": "My RPi bridge",
+        "username": "00:00:00:00:00:00",
+        "pin": "000-00-000"
+    },
+    "accessories": [
+        {
+            "accessory": "MotorizedDoor",
+            "name": "Garage door",
+            "closedSensor": {
+                "pin": 31,
+                "activeValue": true
+            },
+            "openSensor": {
+                "pin": 32,
+                "activeValue": true
+            },
+            "switch": {
+                "pin": 33,
+                "activeValue": false,
+                "cycle": 600
+            },
+            "maxTransitionTime": 14,
+            "canBeStopped": true
+        }
+    ]
+}

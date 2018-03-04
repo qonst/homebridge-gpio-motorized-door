@@ -3,40 +3,37 @@
 ## Sample configuration
 ```javascript
 {
-    "bridge":{
-        "name":"My RPi bridge",
-        "username":"00:00:00:00:00:00",
-        "pin":"000-00-000"
+    "bridge": {
+        "name": "My RPi bridge",
+        "username": "00:00:00:00:00:00",
+        "pin": "000-00-000"
     },
-    "accessories":[
+    "accessories": [
         {
-            "accessory":"MotorizedDoor",
-            "name":"Garage door",
-            "closedSensor":{
-                "pin":31,
-                "activeValue":1
+            "accessory": "MotorizedDoor",
+            "name": "Garage door",
+            "initialFallbackState": 0,
+            "closedSensor": {
+                "pin": 31,
+                "activeValue": true
             },
-            "openSensor":{
-                "pin":32,
-                "activeValue":1
+            "openSensor": {
+                "pin": 32,
+                "activeValue": true
             },
-            "switch":{
-                "pin":33,
-                "activeValue":0,
-                "cycle":600
+            "switch": {
+                "pin": 33,
+                "activeValue": false,
+                "cycle": 600
             },
-            "rpioSettings":{
-                "gpiomem":true,
-                "mapping":"physical"
-            },
-            "maxTransitionTime":14,
-            "canBeStopped":true
+            "maxTransitionTime": 14,
+            "canBeStopped": true
         }
     ]
 }
 ```
 * for `switch`, `openSensor` and `closedSensor` 
-  * `pin` value is the pin-number handed over to RPIO, configured by `rpioSettings`
+  * `pin` value is the pin-number (GPIO number, not physical pins)
   * `activeValue` is the value used to set/determine the on-state of the pin
 * `switch` defines the relay triggering the door to open or close
   * `cycle` is the time in milliseconds the relay is set to `activeValue`
@@ -46,4 +43,5 @@
 * `openSensor` and `closedSensor` defines sensors triggered when the door reaches fully opened or closed states
   (magnetic reed-switches is useful for this).  
   If only one or no sensors are defined, a timeout-trigger will be used instead based on `maxTransitionTime`.
-* `canBeStopped` configures whether the door can be stopped mid transition. If it does, it's assumed triggering the switch will stop the door and another triggering will make the door reverse direction.
+* `canBeStopped` configures whether the door can be stopped mid transition. If it does, it's assumed triggering the switch will stop the door and anothertriggering will make the door reverse direction.
+* `initialFallbackState` defines the initial state of the door if no sensors are defined or active
