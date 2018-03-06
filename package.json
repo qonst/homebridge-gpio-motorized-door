@@ -1,6 +1,6 @@
 {
     "name": "homebridge-gpio-motorized-door",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "description": "Exposes a door accessory to HomeBridge that uses a RaspberryPi GPIO pins",
     "main": "dist/index.js",
     "types": "lib/",
