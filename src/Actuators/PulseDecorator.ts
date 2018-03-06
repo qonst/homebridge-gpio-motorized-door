@@ -1,4 +1,4 @@
-import { Relay, IRelay } from "./Relay";
+import { IRelay } from "./Relay";
 
 export class PulseDecorator implements IRelay {
 

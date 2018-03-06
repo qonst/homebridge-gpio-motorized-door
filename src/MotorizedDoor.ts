@@ -8,6 +8,7 @@ import { GpioSensor, GpioSensorConfiguration } from "./Sensors/GpioSensor";
 import { TimedSensor } from "./Sensors/TimedSensor";
 import { IRelay } from "./Actuators/Relay";
 import { PulseDecorator } from "./Actuators/PulseDecorator";
+import * as rpio from "rpio";
 
 export class MotorizedDoor {
     /** set if the door doesn't reach a sensor with the expected time */
@@ -128,6 +129,9 @@ export class MotorizedDoor {
             },
             ...config
         };
+
+
+        rpio.init({gpiomem: true, mapping: "gpio"});
 
         { // Create sensors
             let closedSensor: Sensor | null = null;
